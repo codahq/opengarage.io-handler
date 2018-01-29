@@ -65,12 +65,14 @@ def initialize() {
 
 def open() {
     log.info "Executing 'open'"
-    api("openclose", [])
+    state.opening = 1
+    api("getstatus", [])
 }
 
 def close() {
 	log.info "Executing 'close'"
-    api("openclose", [])
+    state.closing = 1
+    api("getstatus", [])
 }
 
 def refresh() {
@@ -86,7 +88,7 @@ def api(method, args = [], success = {}) {
 
     def request = methods.getAt(method)
     if (isDebug()) log.debug "About to do doRequest with values $request.gdipadd, $request.gdport, $request.gdpath, $request.gdtype, $success"
-    doRequest(request.gdipadd, request.gdport, request.gdpath, request.gdtype, success)
+    return doRequest(request.gdipadd, request.gdport, request.gdpath, request.gdtype, success)
 }
 
 private doRequest(gdipadd, gdport, gdpath, gdtype, success) {
@@ -165,14 +167,39 @@ def parse(description) {
      }
     //status update request
     if(json.mac){
-    	if(json.door){
-        	log.info "door is open - refreshing setting"
-        	state.doorStatus = 1
-            result = createEvent(name: "garagedoor", value: "open")
+    
+        if (state.doorStatus != json.door) {
+            state.doorStatus = json.door
+            def action = json.door ? "open" : "closed"
+            log.info "door is ${action} - refreshing setting"
+            result = createEvent(name: "garagedoor", value: action)
+        } 
+        else {
+        	if (isDebug()) log.debug "no update necessary"
+        }
+        
+        if (isDebug()) log.debug "and closing/opening is ${state.closing}/${state.opening}"
+
+        if(json.door){	        	
+            if (state.closing == 1) {
+                state.closing = 0
+                log.info "door can close"
+                sendHubCommand(api("openclose", []))
+            }
+            if (state.opening == 1) {
+                state.opening = 0
+                log.info "door is already opened"
+            }
         } else {
-        	log.info "door is closed - refreshing setting"
-        	state.doorStatus = 0
-            result = createEvent(name: "garagedoor", value: "closed")
+            if (state.opening == 1) {
+                state.opening = 0
+                log.info "door can open"
+                sendHubCommand(api("openclose", []))
+            }
+            if (state.closing == 1) {
+                state.closing = 0
+                log.info "door is already closed"
+            }
         }
     }
     
