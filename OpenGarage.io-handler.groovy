@@ -16,19 +16,19 @@
  */
 
 preferences {
-    input("devicekey", "text",     title: "Device Key",   description: "Your OpenGarage.io device key")
-    input("ipadd",       "text",     title: "IP address", description: "The IP address of your OpenGarage.io unit")
-    input("port",     "text",     title: "Port",       description: "The port of your OpenGarage.io unit")
+    input("devicekey", "text",     title: "Device Key", description: "Your OpenGarage.io device key")
+    input("ipadd",     "text",     title: "IP address", description: "The IP address of your OpenGarage.io unit")
+    input("port",      "text",     title: "Port",       description: "The port of your OpenGarage.io unit")
 }
 
 metadata {
-    definition (name: "OpenGarage.io Handler", namespace: "littlegumSmartHome", author: "Ian Lindsay") {
+    definition (name: "OpenGarage.io Handler", namespace: "me.bendy.opengarage", author: "Ben Rimmasch") {
         capability "Door Control"
         capability "Garage Door Control"
         capability "Refresh"
     }
 
-	tiles (scale: 2){
+	tiles (scale: 2) {
         standardTile("garagedoor", "device.garagedoor", width: 6, height: 4) {
   			state "open", label: '${name}', action: "close", icon: "st.doors.garage.garage-open", backgroundColor: "#e54444"
   			state "closed", label: '${name}', action: "open", icon: "st.doors.garage.garage-closed", backgroundColor: "#79b821"
@@ -53,11 +53,22 @@ def installed() {
     initialize()
 }
 
+def updated() {
+	if (!state.initialized) {
+    	initialize()
+    }
+    refresh()
+}
+
 def initialize() {
-	log.info "initialize triggered"
+	log.info "Initialize triggered"
     // initialize state
-    state.doorStatus =  1 // 1 means open, 0 means closed
-	api("getstatus", [])
+    state.pollingInterval = state.pollingInterval != null ? state.pollingInterval : 5  //time in minutes
+    state.doorStatus =  state.doorStatus != null ? state.doorStatus : 1 // 1 means open, 0 means closed
+    state.opening = state.opening != null ? state.opening : 0
+    state.closing = state.closing != null ? state.closing : 0
+    state.initialized = 1
+  	refresh()
 }
 
 def open() {
@@ -73,8 +84,25 @@ def close() {
 }
 
 def refresh() {
-	log.info "Refreshing Values "
+	log.info "Executing 'refresh'"
+    unschedule()
+    state.updatedDate = now();
     api("getstatus", [])
+    customPolling()
+}
+
+def customPolling() {
+	if (!isConfigured()) {
+    	log.info "Polling canceled. Please configure the device!"
+        return
+    }
+	double timesSinceContact = (now() - state.updatedDate).abs() / 60000  //time since last update in minutes
+    if (isDebug()) log.debug "Polling started.  timesSinceContact: ${timesSinceContact}"
+    if (timesSinceContact > state.pollingInterval) {
+    	if (isDebug()) log.debug "Polling interval exceeded"
+        refresh()
+    }    
+    runIn(state.pollingInterval * 60, customPolling)  //time in seconds
 }
 
 def api(method, args = [], success = {}) {
@@ -89,7 +117,10 @@ def api(method, args = [], success = {}) {
 }
 
 private doRequest(gdipadd, gdport, gdpath, gdtype, success) {
-  
+    if (!isConfigured()) {
+    	log.info "Request canceled. Please configure the device!"
+        return
+    }
     def host = gdipadd
     def hosthex = convertIPToHex(host)
     def porthex = convertPortToHex(gdport)
@@ -103,7 +134,7 @@ private doRequest(gdipadd, gdport, gdpath, gdtype, success) {
     device.deviceNetworkId = "$hosthex:$porthex"
 	if (isDebug()) log.debug "And just for good measture: ${getHostAddress()}"
 
-	if (isDebug()) log.debug "path is: $gdpath"
+	if (isDebug()) log.debug "Path is: $gdpath"
     
     def headers = [:] //"HOST:" + getHostAddress() + ""
     headers.put("HOST", "$host:$gdport")
@@ -119,90 +150,101 @@ private doRequest(gdipadd, gdport, gdpath, gdtype, success) {
             ,device.deviceNetworkId
     	)
     	if (isDebug()) log.debug "After HubAction"
-        return hubAction
+        return sendHubCommand(hubAction)
     }
     catch (Exception e) 
     {
-        log.debug "Hit Exception on $hubAction"
+        log.debug "Hit exception in doRequest: ${hubAction}"
         log.debug e
     }  
 }
 
 def parse(description) {
 
-    def msg = parseLanMessage(description)
-	
-    if (isDebug()) log.debug "Start of parse: $msg"
-    
-    def headersAsString = msg.header // => headers as a string
-    def headerMap = msg.headers      // => headers as a Map
-    def body = msg.body              // => request body as a string
-    def status = msg.status          // => http status code of the response
-    //def json = msg.json              // => any JSON included in response body, as a data structure of lists and maps
-    //def xml = msg.xml                // => any XML included in response body, as a document tree structure
-    //def data = msg.data              // => either JSON or XML in response body (whichever is specified by content-type header in response)
-	
-    def slurper = new groovy.json.JsonSlurper()
- 	def json = slurper.parseText(msg.body)
- 
-    if (isDebug()) log.debug json
-    
-    def result
-	if (isDebug()) log.debug "before state.doorStatus: $state.doorStatus"
-    
-    // open / close event
-	if(json.result){
-    	if(state.doorStatus){
-        	log.info "door open - so closing"
-        	state.doorStatus = 0
-            result = createEvent(name: "garagedoor", value: "closed")
-        } else {
-        	log.info "door closed - so opening"
-        	state.doorStatus = 1
-            result = createEvent(name: "garagedoor", value: "open")
-        }
-     }
-    //status update request
-    if(json.mac){
-    
-        if (state.doorStatus != json.door) {
-            state.doorStatus = json.door
-            def action = json.door ? "open" : "closed"
-            log.info "door is ${action} - refreshing setting"
-            result = createEvent(name: "garagedoor", value: action)
-        } 
-        else {
-        	if (isDebug()) log.debug "no update necessary"
-        }
-        
-        if (isDebug()) log.debug "and closing/opening is ${state.closing}/${state.opening}"
+	def result
+	try {
+        def msg = parseLanMessage(description)
 
-        if(json.door){	        	
-            if (state.closing == 1) {
-                state.closing = 0
-                log.info "door can close"
-                sendHubCommand(api("openclose", []))
+        if (isDebug()) log.debug "Start of parse: $msg"
+
+        def headersAsString = msg.header // => headers as a string
+        def headerMap = msg.headers      // => headers as a Map
+        def body = msg.body              // => request body as a string
+        def status = msg.status          // => http status code of the response
+        //def json = msg.json              // => any JSON included in response body, as a data structure of lists and maps
+        //def xml = msg.xml                // => any XML included in response body, as a document tree structure
+        //def data = msg.data              // => either JSON or XML in response body (whichever is specified by content-type header in response)
+
+        def slurper = new groovy.json.JsonSlurper()
+        def json = slurper.parseText(msg.body)
+
+        if (isDebug()) log.debug json       
+        if (isDebug()) log.debug "Before state.doorStatus: $state.doorStatus"
+
+        // open / close event
+        if(json.result){
+            if(state.doorStatus){
+                log.info "Door open so closing"
+                state.doorStatus = 0
+                result = createEvent(name: "garagedoor", value: "closed", descriptionText: "${device.name} closed")
+            } else {
+                log.info "Door closed so opening"
+                state.doorStatus = 1
+                result = createEvent(name: "garagedoor", value: "open", descriptionText: "${device.name} opened")
             }
-            if (state.opening == 1) {
-                state.opening = 0
-                log.info "door is already opened"
+         }
+        //status update request
+        if(json.mac){
+			def action = json.door ? "open" : "closed"
+            if (state.doorStatus != json.door) {
+                state.doorStatus = json.door
+                log.info "Door is ${action}. Refreshing state"
+                result = createEvent(name: "garagedoor", value: action, descriptionText: "${device.name} updated to ${action}")
+            } 
+            else {
+                if (isDebug()) log.debug "Already in sync.  No change necessary"
+                result = createEvent(name: "garagedoor", value: action, descriptionText: "${device.name} already synchronized", displayed: false, isStateChange: false)
             }
-        } else {
-            if (state.opening == 1) {
-                state.opening = 0
-                log.info "door can open"
-                sendHubCommand(api("openclose", []))
-            }
-            if (state.closing == 1) {
-                state.closing = 0
-                log.info "door is already closed"
+
+            if (isDebug()) log.debug "and closing/opening is ${state.closing}/${state.opening}"
+
+            if(json.door){	        	
+                if (state.closing == 1) {
+                    state.closing = 0
+                    log.info "Door can close"
+                    sendHubCommand(api("openclose", []))
+                }
+                if (state.opening == 1) {
+                    state.opening = 0
+                    log.info "Door is already opened"
+                }
+            } else {
+                if (state.opening == 1) {
+                    state.opening = 0
+                    log.info "Door can open"
+                    sendHubCommand(api("openclose", []))
+                }
+                if (state.closing == 1) {
+                    state.closing = 0
+                    log.info "Door is already closed"
+                }
             }
         }
+
+        if (isDebug()) log.debug "after state.doorStatus: $state.doorStatus"
     }
-    
-    if (isDebug()) log.debug "after state.doorStatus: $state.doorStatus"
-    
+    catch (Exception e)
+    {
+        log.debug "Hit exception in parse"
+        log.debug e
+    }  
     return result
+}
+
+
+/*General Helper Methods*/
+private isConfigured() {
+	return ipadd && port && devicekey
 }
 
 
@@ -214,7 +256,7 @@ private String convertIPToHex(ipAddress) {
 }
 private String convertPortToHex(port) {
 	String hexport = port.toString().format( '%04x', port.toInteger() )
-    if (isDebug()) log.debug "Port entered is ${port} and teh converted hex port is ${hexport}"
+    if (isDebug()) log.debug "Port entered is ${port} and the converted hex port is ${hexport}"
     return hexport.toUpperCase()
 }
 
