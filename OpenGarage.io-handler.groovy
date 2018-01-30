@@ -1,11 +1,8 @@
 /**
- *  Copyright 2017 Ian Lindsay
+ *  Copyright 2018 Ben Rimmasch
  *
- *  Code snippets taken from Tim Slagle
- *  https://community.smartthings.com/u/tslagle13
- *  here:
- *  https://community.smartthings.com/t/generic-camera-device-using-local-connection-new-version-now-available/3269/75?u=l0kiscot
- *
+ *  Based on a device handler by Ian Lindsay which is originally forked from here:
+ *  https://github.com/littlegumSmartHome/opengarage.io-handler
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
