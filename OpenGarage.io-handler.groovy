@@ -3,6 +3,9 @@
  *
  *  Based on a device handler by Ian Lindsay which is originally forked from here:
  *  https://github.com/littlegumSmartHome/opengarage.io-handler
+ * 
+ *  This code can be found at:
+ *  https://github.com/codahq/opengarage.io-handler
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
@@ -33,12 +36,17 @@ metadata {
   			state "open", label: '${name}', action: "close", icon: "st.doors.garage.garage-open", backgroundColor: "#e54444"
   			state "closed", label: '${name}', action: "open", icon: "st.doors.garage.garage-closed", backgroundColor: "#79b821"
 		}
-		standardTile("refresh", "device.refresh", inactiveLabel: false, decoration: "flat", width: 6, height: 2) {
+		standardTile("vehicle", "device.vehicle", width: 3, height: 2) {
+            state "absent", label: "Absent", backgroundColor: "#e54444"
+  			state "present", label: "Present", icon: "st.Transportation.transportation10", backgroundColor: "#79b821"
+            state "na", label: "Open", icon: "st.Transportation.transportation13", backgroundColor: "#ffff99"
+		}
+        standardTile("refresh", "device.refresh", inactiveLabel: false, decoration: "flat", width: 3, height: 2) {
 			state "default", action: "refresh.refresh", icon: "st.secondary.refresh"
 		}
 
 		main("garagedoor")
-		details(["garagedoor", "refresh"])
+		details(["garagedoor", "vehicle", "refresh"])
 	}
     simulator {
         // simulator metadata
@@ -46,7 +54,7 @@ metadata {
 }
 
 def isDebug() {
-    return false
+    return true
 }
 
 def installed() {
@@ -64,7 +72,9 @@ def initialize() {
 	log.info "Initialize triggered"
     // initialize state
     state.pollingInterval = state.pollingInterval != null ? state.pollingInterval : 5  //time in minutes
+    state.garageMotionTime = state.garageMotionTime != null ? state.garageMotionTime : 20  //time in seconds
     state.doorStatus =  state.doorStatus != null ? state.doorStatus : 1 // 1 means open, 0 means closed
+    state.vehicleStatus = state.vehicleStatus != null ? state.vehicleStatus : 2 // 0 means absent, 1 means present, 2 means na because door is open
     state.opening = state.opening != null ? state.opening : 0
     state.closing = state.closing != null ? state.closing : 0
     state.initialized = 1
@@ -161,7 +171,7 @@ private doRequest(gdipadd, gdport, gdpath, gdtype, success) {
 
 def parse(description) {
 
-	def result
+	def events = []
 	try {
         def msg = parseLanMessage(description)
 
@@ -186,29 +196,33 @@ def parse(description) {
             if(state.doorStatus){
                 log.info "Door open so closing"
                 state.doorStatus = 0
-                result = createEvent(name: "garagedoor", value: "closed", descriptionText: "${device.name} closed")
+                events << createEvent(name: "garagedoor", value: "closed", descriptionText: "${device.name} closed")
+                events << createEvent(name: "vehicle", value: "na", descriptionText: "${device.name}'s vehicle updated to 'na' while door is moving", displayed: false)
+                runIn(state.garageMotionTime, refresh)
             } else {
                 log.info "Door closed so opening"
                 state.doorStatus = 1
-                result = createEvent(name: "garagedoor", value: "open", descriptionText: "${device.name} opened")
+                events << createEvent(name: "garagedoor", value: "open", descriptionText: "${device.name} opened")
+                events << createEvent(name: "vehicle", value: "na", descriptionText: "${device.name}'s vehicle updated to 'na' while door is moving", displayed: false)
+                runIn(state.garageMotionTime, refresh)
             }
          }
         //status update request
-        if(json.mac){
+        if (json.mac) {
 			def action = json.door ? "open" : "closed"
             if (state.doorStatus != json.door) {
                 state.doorStatus = json.door
                 log.info "Door is ${action}. Refreshing state"
-                result = createEvent(name: "garagedoor", value: action, descriptionText: "${device.name} updated to ${action}")
+                events << createEvent(name: "garagedoor", value: action, descriptionText: "${device.name} updated to ${action}")
             } 
             else {
-                if (isDebug()) log.debug "Already in sync.  No change necessary"
-                result = createEvent(name: "garagedoor", value: action, descriptionText: "${device.name} already synchronized", displayed: false, isStateChange: false)
+                if (isDebug()) log.debug "Door state already in sync.  No change necessary"
+                events << createEvent(name: "garagedoor", value: action, descriptionText: "${device.name} already synchronized", displayed: false, isStateChange: false)
             }
 
             if (isDebug()) log.debug "and closing/opening is ${state.closing}/${state.opening}"
 
-            if(json.door){	        	
+            if (json.door) {	        	
                 if (state.closing == 1) {
                     state.closing = 0
                     log.info "Door can close"
@@ -218,7 +232,8 @@ def parse(description) {
                     state.opening = 0
                     log.info "Door is already opened"
                 }
-            } else {
+            } 
+            else {
                 if (state.opening == 1) {
                     state.opening = 0
                     log.info "Door can open"
@@ -229,6 +244,29 @@ def parse(description) {
                     log.info "Door is already closed"
                 }
             }
+            
+            def present
+            switch (json.vehicle) {
+            	case 0:
+                	present = "absent"
+                    break
+                case 1:
+                	present = "present"
+                    break
+                default:
+                	present = "na"
+                    break
+            }
+            if (state.vehicleStatus != json.vehicle) {
+                state.vehicleStatus = json.vehicle
+                log.info "Vehicle is ${present}. Refreshing state"
+                events << createEvent(name: "vehicle", value: present, descriptionText: "${device.name}'s vehicle updated to ${present}")
+            } 
+            else {
+                if (isDebug()) log.debug "Vehicle state already in sync.  No change necessary"
+                events << createEvent(name: "vehicle", value: present, descriptionText: "${device.name}'s vehicle already synchronized", displayed: false, isStateChange: false)
+            }
+
         }
 
         if (isDebug()) log.debug "after state.doorStatus: $state.doorStatus"
@@ -237,13 +275,17 @@ def parse(description) {
     {
         log.debug "Hit exception in parse"
         log.debug e
-    }  
-    return result
+    }
+
+    return events
 }
 
 
 /*General Helper Methods*/
 private isConfigured() {
+	if (!state.pollingInterval || !state.garageMotionTime) {
+    	initialize()
+    }
 	return ipadd && port && devicekey
 }
 
