@@ -54,7 +54,7 @@ metadata {
 }
 
 def isDebug() {
-    return true
+    return false
 }
 
 def installed() {
