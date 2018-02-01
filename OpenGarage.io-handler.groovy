@@ -39,7 +39,7 @@ metadata {
 		standardTile("vehicle", "device.vehicle", width: 3, height: 2) {
             state "absent", label: "Absent", backgroundColor: "#e54444"
   			state "present", label: "Present", icon: "st.Transportation.transportation10", backgroundColor: "#79b821"
-            state "na", label: "Open", icon: "st.Transportation.transportation13", backgroundColor: "#ffff99"
+            state "na", label: "Open", icon: "st.Transportation.transportation13", backgroundColor: "#f0f066"
 		}
         standardTile("refresh", "device.refresh", inactiveLabel: false, decoration: "flat", width: 3, height: 2) {
 			state "default", action: "refresh.refresh", icon: "st.secondary.refresh"
