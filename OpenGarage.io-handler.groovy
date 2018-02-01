@@ -33,8 +33,8 @@ metadata {
 
 	tiles (scale: 2) {
         standardTile("garagedoor", "device.garagedoor", width: 6, height: 4) {
-  			state "open", label: '${name}', action: "close", icon: "st.doors.garage.garage-open", backgroundColor: "#e54444"
-  			state "closed", label: '${name}', action: "open", icon: "st.doors.garage.garage-closed", backgroundColor: "#79b821"
+  			state "open", label: '${name}', action: "close", icon: "st.doors.garage.garage-open", backgroundColor: "#e54444", nextState: "closed"
+  			state "closed", label: '${name}', action: "open", icon: "st.doors.garage.garage-closed", backgroundColor: "#79b821", nextState: "open"
 		}
 		standardTile("vehicle", "device.vehicle", width: 3, height: 2) {
             state "absent", label: "Absent", backgroundColor: "#e54444"
@@ -72,7 +72,7 @@ def initialize() {
 	log.info "Initialize triggered"
     // initialize state
     state.pollingInterval = state.pollingInterval != null ? state.pollingInterval : 5  //time in minutes
-    state.garageMotionTime = state.garageMotionTime != null ? state.garageMotionTime : 20  //time in seconds
+    state.garageMotionTime = state.garageMotionTime != null ? state.garageMotionTime : 25  //time in seconds
     state.doorStatus =  state.doorStatus != null ? state.doorStatus : 1 // 1 means open, 0 means closed
     state.vehicleStatus = state.vehicleStatus != null ? state.vehicleStatus : 2 // 0 means absent, 1 means present, 2 means na because door is open
     state.opening = state.opening != null ? state.opening : 0
@@ -204,7 +204,6 @@ def parse(description) {
                 state.doorStatus = 1
                 events << createEvent(name: "garagedoor", value: "open", descriptionText: "${device.name} opened")
                 events << createEvent(name: "vehicle", value: "na", descriptionText: "${device.name}'s vehicle updated to 'na' while door is moving", displayed: false)
-                runIn(state.garageMotionTime, refresh)
             }
          }
         //status update request
