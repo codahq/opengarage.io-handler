@@ -49,28 +49,28 @@ def updated() {
 }
 
 mappings {
-    path("/needs_update") {
+    path("/do_update") {
         action: [
-            GET: "doRefresh"
+            GET: "doUpdate"
         ]
     }
 }
 
-void doRefresh() {
+void doUpdate() {
     log.debug "Updated with settings: ${settings}"
     og?.refresh()
 }
 
 def generateURL() {
     createAccessToken()
-    ["https://graph.api.smartthings.com/api/smartapps/installations/${app.id}/open", "?access_token=${state.accessToken}"]
+    ["https://graph.api.smartthings.com/api/smartapps/installations/${app.id}/do_update", "?access_token=${state.accessToken}"]
 }
 
 def viewURL() {
     dynamicPage(name: "viewURL", title: "OpenGarage HTTP Refresh Endpoint", install:!resetOauth, nextPage: resetOauth ? "viewURL" : null) {
         section() {
             generateURL() 
-            paragraph "Refresh: https://graph.api.smartthings.com/api/smartapps/installations/${app.id}/needs_update?access_token=${state.accessToken}"
+            paragraph "Refresh: https://graph.api.smartthings.com/api/smartapps/installations/${app.id}/do_update?access_token=${state.accessToken}"
             paragraph "Note that your base URL may not be https://graph.api.smartthings.com.  Verify your base API URL!"
         }
     }
