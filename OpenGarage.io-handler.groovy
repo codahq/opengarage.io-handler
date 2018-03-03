@@ -29,6 +29,7 @@ metadata {
         capability "Door Control"
         capability "Garage Door Control"
         capability "Refresh"
+        capability "Sensor"
     }
 
 	tiles (scale: 2) {
@@ -65,6 +66,18 @@ def updated() {
 	if (!state.initialized) {
     	initialize()
     }
+    try {
+    	if (ipadd != null && port != null && !isDebug()) {
+    		device.deviceNetworkId = getHexHostAddress()
+        	log.info "Device Network ID set to: ${device.deviceNetworkId}"
+    	}
+    	else {
+    		log.warn "IP and port must be configured in the device's preferences in the IDE."
+    	}
+    }
+    catch (Exception e) {
+    	log.warn "Couldn't set Device Network ID: ${e}"
+    }
     refresh()
 }
 
@@ -78,6 +91,8 @@ def initialize() {
     state.opening = state.opening != null ? state.opening : 0
     state.closing = state.closing != null ? state.closing : 0
     state.initialized = 1
+    log.info "This device's Device Network Id must match the MAC address of the OpenGarage as seen under http://<ip>:<port>/jc. It should be all uppercase and without any octet separators (000A959D6816).  Current value i: ${device.deviceNetworkId}"
+    log.info "Receiving local POST on ${device.hub?.getDataValue('localIP')}:${device.hub?.getDataValue('localSrvPortTCP')}"
   	refresh()
 }
 
@@ -131,23 +146,17 @@ private doRequest(gdipadd, gdport, gdpath, gdtype, success) {
     	log.info "Request canceled. Please configure the device!"
         return
     }
-    def host = gdipadd
-    def hosthex = convertIPToHex(host)
-    def porthex = convertPortToHex(gdport)
-    if (porthex.length() < 4) {
-    	porthex = "00" + porthex
-    }
+
+    def hexHostPort = getHexHostAddress()
     
-    if (isDebug()) log.debug "Port in Hex is $porthex"
-    if (isDebug()) log.debug "Hosthex is : $hosthex"   
+    if (isDebug()) log.debug "Hex Host:Port is : ${hexHostPort}"   
     if (isDebug()) log.debug "DNI is ${device.deviceNetworkId}"
-    device.deviceNetworkId = "$hosthex:$porthex"
 	if (isDebug()) log.debug "And just for good measture: ${getHostAddress()}"
 
-	if (isDebug()) log.debug "Path is: $gdpath"
+	if (isDebug()) log.debug "Path is: ${gdpath}"
     
-    def headers = [:] //"HOST:" + getHostAddress() + ""
-    headers.put("HOST", "$host:$gdport")
+    def headers = [:] 
+    headers.put("HOST", "${gdipadd}:${gdport}")
   
 	try {
   		if (isDebug()) log.debug "About to create HubAction"
@@ -157,7 +166,7 @@ private doRequest(gdipadd, gdport, gdpath, gdtype, success) {
                 path: gdpath,
                 headers: headers
             ]
-            ,device.deviceNetworkId
+            ,"${hexHostPort}"
     	)
     	if (isDebug()) log.debug "After HubAction"
         return sendHubCommand(hubAction)
@@ -175,7 +184,7 @@ def parse(description) {
 	try {
         def msg = parseLanMessage(description)
 
-        if (isDebug()) log.debug "Start of parse: $msg"
+        if (isDebug()) log.debug "Start of parse: ${msg}"
 
         def headersAsString = msg.header // => headers as a string
         def headerMap = msg.headers      // => headers as a Map
@@ -189,7 +198,7 @@ def parse(description) {
         def json = slurper.parseText(msg.body)
 
         if (isDebug()) log.debug json       
-        if (isDebug()) log.debug "Before state.doorStatus: $state.doorStatus"
+        if (isDebug()) log.debug "Before state.doorStatus: ${state.doorStatus}"
 
         // open / close event
         if(json.result){
@@ -208,6 +217,10 @@ def parse(description) {
          }
         //status update request
         if (json.mac) {
+        	if (device.deviceNetworkId != json.mac.replaceAll(":", "")) {
+        		device.deviceNetworkId = json.mac.replaceAll(":", "")
+                log.info "Updated Device Network ID to MAC: ${device.deviceNetworkId}"
+            }
 			def action = json.door ? "open" : "closed"
             if (state.doorStatus != json.door) {
                 state.doorStatus = json.door
@@ -267,8 +280,12 @@ def parse(description) {
             }
 
         }
+        if (json.refresh) {
+        	log.info "Update needed.  Doing refresh!"
+            sendHubCommand(api("openclose", []))
+        }
 
-        if (isDebug()) log.debug "after state.doorStatus: $state.doorStatus"
+        if (isDebug()) log.debug "after state.doorStatus: ${state.doorStatus}"
     }
     catch (Exception e)
     {
@@ -284,7 +301,7 @@ def parse(description) {
 private isConfigured() {
 	if (!state.pollingInterval || !state.garageMotionTime) {
     	initialize()
-    }
+    }    
 	return ipadd && port && devicekey
 }
 
@@ -292,7 +309,7 @@ private isConfigured() {
 /*To Hex Helper Methods*/
 private String convertIPToHex(ipAddress) { 
     String hex = ipAddress.tokenize( '.' ).collect {  String.format( '%02x', it.toInteger() ) }.join()
-    if (isDebug()) log.debug "IP address entered is $ipAddress and the converted hex code is $hex"
+    if (isDebug()) log.debug "IP address entered is ${ipAddress} and the converted hex code is ${hex}"
     return hex.toUpperCase()
 }
 private String convertPortToHex(port) {
@@ -303,18 +320,32 @@ private String convertPortToHex(port) {
 
 
 /*Out of Hex Help Methods*/
-private Integer convertHexToInt(hex) {
-    if (isDebug()) log.debug "Convert hex to int: ${hex}"
-	return Integer.parseInt(hex,16)
-}
-private String convertHexToIP(hex) {
-	if (isDebug()) log.debug("Convert hex to ip: $hex") //	a0 00 01 6
-	[convertHexToInt(hex[0..1]),convertHexToInt(hex[2..3]),convertHexToInt(hex[4..5]),convertHexToInt(hex[6..7])].join(".")
-}
+//private Integer convertHexToInt(hex) {
+//    if (isDebug()) log.debug "Convert hex to int: ${hex}"
+//	return Integer.parseInt(hex,16)
+//}
+//private String convertHexToIP(hex) {
+//	if (isDebug()) log.debug("Convert hex to ip: $hex") //	a0 00 01 6
+//	[convertHexToInt(hex[0..1]),convertHexToInt(hex[2..3]),convertHexToInt(hex[4..5]),convertHexToInt(hex[6..7])].join(".")
+//}
+//private getHostAddress() {
+//	def parts = device.deviceNetworkId.split(":")
+//    if (isDebug()) log.debug "Device Network ID: $device.deviceNetworkId"
+//	def ip = convertHexToIP(parts[0])
+//	def port = convertHexToInt(parts[1])
+//	return ip + ":" + port
+//}
 private getHostAddress() {
-	def parts = device.deviceNetworkId.split(":")
-    if (isDebug()) log.debug "Device Network ID: $device.deviceNetworkId"
-	def ip = convertHexToIP(parts[0])
-	def port = convertHexToInt(parts[1])
-	return ip + ":" + port
+	return "${ipadd}:${port}"
+}
+
+private getHexHostAddress() {
+	def hosthex = convertIPToHex(ipadd)
+    def porthex = convertPortToHex(port)
+    if (porthex.length() < 4) {
+    	porthex = "00" + porthex
+    }
+    if (isDebug()) log.debug "Hosthex is : $hosthex"
+    if (isDebug()) log.debug "Port in Hex is $porthex"
+    return "${hosthex}:${porthex}"
 }
