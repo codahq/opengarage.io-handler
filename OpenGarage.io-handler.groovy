@@ -282,7 +282,7 @@ def parse(description) {
         }
         if (json.refresh) {
         	log.info "Update needed.  Doing refresh!"
-            sendHubCommand(api("openclose", []))
+            sendHubCommand(api("getstatus", []))
         }
 
         if (isDebug()) log.debug "after state.doorStatus: ${state.doorStatus}"
